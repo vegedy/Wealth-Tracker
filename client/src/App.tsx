@@ -44,22 +44,22 @@ function App() {
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
-          <SidebarProvider style={sidebarStyle as React.CSSProperties}>
-            <div className="flex h-screen w-full">
-              <AppSidebar />
-              <div className="flex flex-col flex-1 min-w-0">
-                <header className="flex items-center justify-between p-2 border-b shrink-0">
-                  <SidebarTrigger data-testid="button-sidebar-toggle" />
-                  <ThemeToggle />
-                </header>
-                <main className="flex-1 overflow-hidden">
-                  <Router hook={useHashLocation}>
+          <Router hook={useHashLocation}>
+            <SidebarProvider style={sidebarStyle as React.CSSProperties}>
+              <div className="flex h-screen w-full">
+                <AppSidebar />
+                <div className="flex flex-col flex-1 min-w-0">
+                  <header className="flex items-center justify-between p-2 border-b shrink-0">
+                    <SidebarTrigger data-testid="button-sidebar-toggle" />
+                    <ThemeToggle />
+                  </header>
+                  <main className="flex-1 overflow-hidden">
                     <AppRouter />
-                  </Router>
-                </main>
+                  </main>
+                </div>
               </div>
-            </div>
-          </SidebarProvider>
+            </SidebarProvider>
+          </Router>
           <Toaster />
         </TooltipProvider>
       </QueryClientProvider>

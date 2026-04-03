@@ -19,7 +19,7 @@
  * All values are in EUR.
  */
 
-import type { Area, Asset, Holding, PricePoint } from "@shared/schema";
+import type { Area, Asset, Holding, PricePoint } from "../shared/schema";
 
 export interface TimeSeriesPoint {
   date: string; // YYYY-MM-DD

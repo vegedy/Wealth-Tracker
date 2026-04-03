@@ -10,7 +10,7 @@ import {
   generateDateRange,
   type AreaTimeSeries,
 } from "./timeseries";
-import type { Asset, Holding, PricePoint } from "@shared/schema";
+import type { Asset, Holding, PricePoint } from "../shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
