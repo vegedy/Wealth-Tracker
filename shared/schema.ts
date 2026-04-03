@@ -42,12 +42,16 @@ export type InsertAsset = z.infer<typeof insertAssetSchema>;
 export type Asset = typeof assets.$inferSelect;
 
 // ── Holdings ───────────────────────────────────────────────────────
+// validFrom: date (YYYY-MM-DD) when this holding became active
+// validTo: date (YYYY-MM-DD) when this holding was sold/removed (null = still active)
 export const holdings = sqliteTable("holdings", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   areaId: integer("area_id").notNull(),
   assetId: integer("asset_id").notNull(),
   quantity: real("quantity").notNull(),
   unit: text("unit").notNull().default("Stück"),
+  validFrom: text("valid_from").notNull().default(""), // YYYY-MM-DD
+  validTo: text("valid_to"), // YYYY-MM-DD or null (= still held)
   createdAt: text("created_at").notNull().default(""),
   updatedAt: text("updated_at").notNull().default(""),
 });

@@ -59,18 +59,18 @@ export async function seedDatabase() {
     metadata: null,
   });
 
-  // ── Holdings ──
+  // ── Holdings (with validFrom dates) ──
   // Tresor: 200g Gold, 1000g (1kg) Silber, Sammlermünze
-  await storage.createHolding({ areaId: tresor.id, assetId: gold.id, quantity: 200, unit: "g" });
-  await storage.createHolding({ areaId: tresor.id, assetId: silver.id, quantity: 1000, unit: "g" });
-  await storage.createHolding({ areaId: tresor.id, assetId: sammlermuenze.id, quantity: 1, unit: "Stück" });
+  await storage.createHolding({ areaId: tresor.id, assetId: gold.id, quantity: 200, unit: "g", validFrom: "2025-06-01", validTo: null });
+  await storage.createHolding({ areaId: tresor.id, assetId: silver.id, quantity: 1000, unit: "g", validFrom: "2025-06-15", validTo: null });
+  await storage.createHolding({ areaId: tresor.id, assetId: sammlermuenze.id, quantity: 1, unit: "Stück", validFrom: "2025-09-01", validTo: null });
 
   // Trade Republic: 3 Alphabet, 1 Amazon
-  await storage.createHolding({ areaId: tradeRepublic.id, assetId: alphabet.id, quantity: 3, unit: "Stück" });
-  await storage.createHolding({ areaId: tradeRepublic.id, assetId: amazon.id, quantity: 1, unit: "Stück" });
+  await storage.createHolding({ areaId: tradeRepublic.id, assetId: alphabet.id, quantity: 3, unit: "Stück", validFrom: "2025-07-01", validTo: null });
+  await storage.createHolding({ areaId: tradeRepublic.id, assetId: amazon.id, quantity: 1, unit: "Stück", validFrom: "2025-08-15", validTo: null });
 
   // Tagesgeld: 5000 EUR Cash
-  await storage.createHolding({ areaId: tagesgeld.id, assetId: cashAsset.id, quantity: 5000, unit: "EUR" });
+  await storage.createHolding({ areaId: tagesgeld.id, assetId: cashAsset.id, quantity: 5000, unit: "EUR", validFrom: "2025-06-01", validTo: null });
 
   // ── Price Points (sample historical data in EUR) ──
   // We'll add monthly price points for the last 6 months

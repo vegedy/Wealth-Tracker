@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Edit2, Package, Coins, BarChart3 } from "lucide-react";
+import {
+  Plus, Trash2, Package, Coins, BarChart3, RefreshCw,
+  CheckCircle2, AlertTriangle, Calendar, XCircle
+} from "lucide-react";
 import {
   PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend
 } from "recharts";
@@ -41,6 +43,17 @@ const SOURCE_TYPES = [
   { value: "cash", label: "Cash (1 EUR)" },
 ];
 
+interface PriceStatus {
+  assetId: number;
+  assetName: string;
+  sourceType: string;
+  symbol: string | null;
+  hasPriceData: boolean;
+  latestPrice: number | null;
+  latestDate: string | null;
+  totalPoints: number;
+}
+
 export default function AreasPage() {
   const { toast } = useToast();
 
@@ -56,12 +69,21 @@ export default function AreasPage() {
     queryKey: ["/api/holdings"],
   });
 
+  const { data: priceStatus } = useQuery<PriceStatus[]>({
+    queryKey: ["/api/prices/status"],
+  });
+
   return (
     <div className="p-4 md:p-6 space-y-6 overflow-y-auto h-full">
       <Tabs defaultValue="areas">
         <TabsList>
           <TabsTrigger value="areas" data-testid="tab-areas">Bereiche</TabsTrigger>
-          <TabsTrigger value="assets" data-testid="tab-assets">Assets</TabsTrigger>
+          <TabsTrigger value="assets" data-testid="tab-assets">
+            Assets
+            {priceStatus && priceStatus.some(s => !s.hasPriceData) && (
+              <AlertTriangle className="h-3.5 w-3.5 ml-1.5 text-yellow-500" />
+            )}
+          </TabsTrigger>
           <TabsTrigger value="holdings" data-testid="tab-holdings">Holdings</TabsTrigger>
           <TabsTrigger value="prices" data-testid="tab-prices">Preise</TabsTrigger>
         </TabsList>
@@ -71,7 +93,7 @@ export default function AreasPage() {
         </TabsContent>
 
         <TabsContent value="assets" className="space-y-4 mt-4">
-          <AssetsTab assets={allAssets} />
+          <AssetsTab assets={allAssets} priceStatus={priceStatus} />
         </TabsContent>
 
         <TabsContent value="holdings" className="space-y-4 mt-4">
@@ -79,7 +101,7 @@ export default function AreasPage() {
         </TabsContent>
 
         <TabsContent value="prices" className="space-y-4 mt-4">
-          <PricePointsTab assets={allAssets} />
+          <PricePointsTab assets={allAssets} priceStatus={priceStatus} />
         </TabsContent>
       </Tabs>
     </div>
@@ -182,7 +204,7 @@ function AreasTab({ areas, isLoading }: { areas?: Area[]; isLoading: boolean }) 
 }
 
 // ─── Assets Tab ──────────────────────────────────────────────────────
-function AssetsTab({ assets }: { assets?: Asset[] }) {
+function AssetsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: PriceStatus[] }) {
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [category, setCategory] = useState("custom");
@@ -201,6 +223,7 @@ function AssetsTab({ assets }: { assets?: Asset[] }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/prices/status"] });
       setName("");
       setSymbol("");
       toast({ title: "Asset erstellt" });
@@ -214,9 +237,14 @@ function AssetsTab({ assets }: { assets?: Asset[] }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
       queryClient.invalidateQueries({ queryKey: ["/api/holdings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/prices/status"] });
       toast({ title: "Asset gelöscht" });
     },
   });
+
+  function getStatusForAsset(assetId: number) {
+    return priceStatus?.find(s => s.assetId === assetId);
+  }
 
   return (
     <>
@@ -250,26 +278,50 @@ function AssetsTab({ assets }: { assets?: Asset[] }) {
       </Card>
 
       <div className="space-y-2">
-        {assets?.map((asset) => (
-          <Card key={asset.id} data-testid={`card-asset-${asset.id}`}>
-            <CardContent className="flex items-center justify-between py-3">
-              <div className="flex items-center gap-3">
-                {asset.sourceType === "cash" ? <Coins className="h-4 w-4 text-muted-foreground" /> : <Package className="h-4 w-4 text-muted-foreground" />}
-                <div>
-                  <div className="font-medium text-sm">{asset.name}</div>
-                  <div className="flex gap-2 mt-0.5">
-                    <Badge variant="secondary" className="text-xs">{CATEGORIES.find(c => c.value === asset.category)?.label || asset.category}</Badge>
-                    {asset.symbol && <Badge variant="outline" className="text-xs">{asset.symbol}</Badge>}
-                    <Badge variant="outline" className="text-xs">{SOURCE_TYPES.find(s => s.value === asset.sourceType)?.label || asset.sourceType}</Badge>
+        {assets?.map((asset) => {
+          const status = getStatusForAsset(asset.id);
+          return (
+            <Card key={asset.id} data-testid={`card-asset-${asset.id}`}>
+              <CardContent className="flex items-center justify-between py-3">
+                <div className="flex items-center gap-3">
+                  {asset.sourceType === "cash" ? <Coins className="h-4 w-4 text-muted-foreground" /> : <Package className="h-4 w-4 text-muted-foreground" />}
+                  <div>
+                    <div className="font-medium text-sm flex items-center gap-2">
+                      {asset.name}
+                      {/* Price status indicator */}
+                      {status && asset.sourceType !== "cash" && (
+                        status.hasPriceData ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            {status.totalPoints} Preispunkte
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs text-yellow-600 dark:text-yellow-400">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            Keine Preisdaten
+                          </span>
+                        )
+                      )}
+                    </div>
+                    <div className="flex gap-2 mt-0.5 flex-wrap">
+                      <Badge variant="secondary" className="text-xs">{CATEGORIES.find(c => c.value === asset.category)?.label || asset.category}</Badge>
+                      {asset.symbol && <Badge variant="outline" className="text-xs">{asset.symbol}</Badge>}
+                      <Badge variant="outline" className="text-xs">{SOURCE_TYPES.find(s => s.value === asset.sourceType)?.label || asset.sourceType}</Badge>
+                      {status && status.latestDate && status.latestDate !== "immer" && (
+                        <Badge variant="outline" className="text-xs text-muted-foreground">
+                          Letzter Preis: {formatEur(status.latestPrice || 0)} ({status.latestDate})
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(asset.id)} data-testid={`button-delete-asset-${asset.id}`}>
-                <Trash2 className="h-4 w-4 text-destructive" />
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
+                <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(asset.id)} data-testid={`button-delete-asset-${asset.id}`}>
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              </CardContent>
+            </Card>
+          );
+        })}
         {(!assets || assets.length === 0) && (
           <p className="text-sm text-muted-foreground text-center py-8">Noch keine Assets angelegt.</p>
         )}
@@ -285,6 +337,8 @@ function HoldingsTab({ holdings, areas, assets }: { holdings?: Holding[]; areas?
   const [assetId, setAssetId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [unit, setUnit] = useState("Stück");
+  const [validFrom, setValidFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [validTo, setValidTo] = useState("");
   const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>("all");
 
   const createMutation = useMutation({
@@ -294,6 +348,8 @@ function HoldingsTab({ holdings, areas, assets }: { holdings?: Holding[]; areas?
         assetId: Number(assetId),
         quantity: Number(quantity),
         unit,
+        validFrom,
+        validTo: validTo || null,
       });
     },
     onSuccess: () => {
@@ -337,7 +393,7 @@ function HoldingsTab({ holdings, areas, assets }: { holdings?: Holding[]; areas?
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <Select value={areaId} onValueChange={setAreaId}>
               <SelectTrigger data-testid="select-holding-area"><SelectValue placeholder="Bereich" /></SelectTrigger>
               <SelectContent>
@@ -352,9 +408,19 @@ function HoldingsTab({ holdings, areas, assets }: { holdings?: Holding[]; areas?
             </Select>
             <Input type="number" placeholder="Menge" value={quantity} onChange={(e) => setQuantity(e.target.value)} data-testid="input-holding-quantity" />
             <Input placeholder="Einheit" value={unit} onChange={(e) => setUnit(e.target.value)} data-testid="input-holding-unit" />
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Gültig ab (Pflicht)</Label>
+              <Input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} data-testid="input-holding-valid-from" />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Gültig bis (optional)</Label>
+              <Input type="date" value={validTo} onChange={(e) => setValidTo(e.target.value)} data-testid="input-holding-valid-to" />
+            </div>
+          </div>
+          <div className="mt-3">
             <Button
               onClick={() => createMutation.mutate()}
-              disabled={!areaId || !assetId || !quantity || createMutation.isPending}
+              disabled={!areaId || !assetId || !quantity || !validFrom || createMutation.isPending}
               data-testid="button-create-holding"
             >
               Erstellen
@@ -387,6 +453,23 @@ function HoldingsTab({ holdings, areas, assets }: { holdings?: Holding[]; areas?
                     <div>
                       <div className="font-medium text-sm">{h.quantity} {h.unit} {asset?.name || `Asset #${h.assetId}`}</div>
                       <div className="text-xs text-muted-foreground">{area?.name || `Bereich #${h.areaId}`}</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <Calendar className="h-3 w-3" />
+                          {h.validFrom ? (
+                            <>
+                              ab {new Date(h.validFrom + "T00:00:00").toLocaleDateString("de-DE")}
+                              {h.validTo ? (
+                                <> bis {new Date(h.validTo + "T00:00:00").toLocaleDateString("de-DE")}</>
+                              ) : (
+                                <span className="text-green-600 dark:text-green-400">(aktiv)</span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="italic">kein Startdatum</span>
+                          )}
+                        </span>
+                      </div>
                     </div>
                     <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(h.id)} data-testid={`button-delete-holding-${h.id}`}>
                       <Trash2 className="h-4 w-4 text-destructive" />
@@ -457,7 +540,7 @@ function HoldingsTab({ holdings, areas, assets }: { holdings?: Holding[]; areas?
 }
 
 // ─── Price Points Tab ────────────────────────────────────────────────
-function PricePointsTab({ assets }: { assets?: Asset[] }) {
+function PricePointsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: PriceStatus[] }) {
   const { toast } = useToast();
   const [assetId, setAssetId] = useState("");
   const [timestamp, setTimestamp] = useState("");
@@ -484,6 +567,7 @@ function PricePointsTab({ assets }: { assets?: Asset[] }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/price-points/asset", assetId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/prices/status"] });
       setPrice("");
       setTimestamp("");
       toast({ title: "Preispunkt erstellt" });
@@ -496,12 +580,153 @@ function PricePointsTab({ assets }: { assets?: Asset[] }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/price-points/asset", assetId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/prices/status"] });
       toast({ title: "Preispunkt gelöscht" });
     },
   });
 
+  const fetchAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/prices/fetch-all");
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/price-points/asset"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/prices/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/timeseries"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/distribution"] });
+
+      const fetched = data?.results?.filter((r: any) => r.added > 0) ?? [];
+      const errors = data?.results?.filter((r: any) => r.error) ?? [];
+
+      if (fetched.length > 0) {
+        toast({
+          title: "Preise aktualisiert",
+          description: fetched.map((r: any) => `${r.assetName}: +${r.added}`).join(", "),
+        });
+      } else if (errors.length > 0) {
+        toast({
+          title: "Fehler beim Abrufen",
+          description: errors.map((r: any) => `${r.assetName}: ${r.error}`).join("; "),
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Preise bereits aktuell" });
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Fehler",
+        description: "Preise konnten nicht abgerufen werden. Bitte versuche es später erneut.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const fetchSingleMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/prices/fetch/${id}`);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/price-points/asset", assetId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/prices/status"] });
+      if (data.added > 0) {
+        toast({ title: "Preise abgerufen", description: `${data.added} neue Preispunkte hinzugefügt` });
+      } else if (data.error) {
+        toast({ title: "Fehler", description: data.error, variant: "destructive" });
+      } else {
+        toast({ title: "Bereits aktuell" });
+      }
+    },
+  });
+
+  // Count market assets that are missing data
+  const missingPriceAssets = priceStatus?.filter(s => s.sourceType === "known_market_asset" && !s.hasPriceData) ?? [];
+
   return (
     <>
+      {/* Fetch all prices button + status overview */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <RefreshCw className="h-4 w-4" /> API-Preise verwalten
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button
+              onClick={() => fetchAllMutation.mutate()}
+              disabled={fetchAllMutation.isPending}
+              data-testid="button-fetch-all-prices"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${fetchAllMutation.isPending ? "animate-spin" : ""}`} />
+              {fetchAllMutation.isPending ? "Wird abgerufen..." : "Alle Preise aktualisieren"}
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Ruft aktuelle Kurse für alle Marktpreis-Assets via Yahoo Finance ab.
+            </span>
+          </div>
+
+          {missingPriceAssets.length > 0 && (
+            <div className="flex items-start gap-2 p-3 rounded-md bg-yellow-500/10 border border-yellow-500/20">
+              <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 flex-shrink-0" />
+              <div className="text-sm">
+                <span className="font-medium text-yellow-700 dark:text-yellow-400">
+                  {missingPriceAssets.length} Asset(s) ohne Preisdaten:
+                </span>
+                <span className="text-muted-foreground ml-1">
+                  {missingPriceAssets.map(a => a.assetName).join(", ")}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Price status table */}
+          {priceStatus && priceStatus.length > 0 && (
+            <div className="space-y-1.5">
+              {priceStatus.map((s) => (
+                <div key={s.assetId} className="flex items-center justify-between py-1.5 text-sm border-b border-border/50 last:border-0">
+                  <div className="flex items-center gap-2">
+                    {s.hasPriceData ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                    ) : (
+                      <XCircle className="h-3.5 w-3.5 text-yellow-500" />
+                    )}
+                    <span className="font-medium">{s.assetName}</span>
+                    {s.symbol && <Badge variant="outline" className="text-xs">{s.symbol}</Badge>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {s.sourceType === "cash" ? (
+                      <span className="text-xs text-muted-foreground">1,00 EUR (fest)</span>
+                    ) : s.hasPriceData ? (
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {formatEur(s.latestPrice || 0)} ({s.latestDate}) · {s.totalPoints} Punkte
+                      </span>
+                    ) : (
+                      <span className="text-xs text-yellow-600 dark:text-yellow-400">Keine Daten</span>
+                    )}
+                    {s.sourceType === "known_market_asset" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => fetchSingleMutation.mutate(s.assetId)}
+                        disabled={fetchSingleMutation.isPending}
+                        data-testid={`button-fetch-price-${s.assetId}`}
+                      >
+                        <RefreshCw className={`h-3 w-3 ${fetchSingleMutation.isPending ? "animate-spin" : ""}`} />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Manual price point entry */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium flex items-center gap-2">

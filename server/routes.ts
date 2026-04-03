@@ -10,6 +10,7 @@ import {
   generateDateRange,
   type AreaTimeSeries,
 } from "./timeseries";
+import { fetchAllMarketPrices, fetchPricesForAsset } from "./price-fetcher";
 import type { Asset, Holding, PricePoint } from "../shared/schema";
 
 export async function registerRoutes(
@@ -18,6 +19,20 @@ export async function registerRoutes(
 ): Promise<Server> {
   // Seed on first launch
   await seedDatabase();
+
+  // Fetch market prices in background (non-blocking)
+  fetchAllMarketPrices()
+    .then((r) => {
+      const fetched = r.results.filter((x) => x.added > 0);
+      if (fetched.length > 0) {
+        console.log(`✓ Market prices updated: ${fetched.map((x) => `${x.assetName} (+${x.added})`).join(", ")}`);
+      }
+      const errors = r.results.filter((x) => x.error);
+      if (errors.length > 0) {
+        console.warn(`⚠ Price fetch errors: ${errors.map((x) => `${x.assetName}: ${x.error}`).join(", ")}`);
+      }
+    })
+    .catch((err) => console.warn("Market price fetch failed:", err?.message));
 
   // ═══════════════════════════════════════════════════════════════════
   // Areas CRUD
@@ -232,6 +247,54 @@ export async function registerRoutes(
   });
 
   // ═══════════════════════════════════════════════════════════════════
+  // Price Fetching
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * POST /api/prices/fetch-all
+   * Manually trigger price fetch for all market assets.
+   */
+  app.post("/api/prices/fetch-all", async (_req, res) => {
+    const result = await fetchAllMarketPrices();
+    res.json(result);
+  });
+
+  /**
+   * POST /api/prices/fetch/:assetId
+   * Fetch prices for a single asset.
+   */
+  app.post("/api/prices/fetch/:assetId", async (req, res) => {
+    const asset = await storage.getAsset(Number(req.params.assetId));
+    if (!asset) return res.status(404).json({ message: "Asset not found" });
+    const result = await fetchPricesForAsset(asset);
+    res.json(result);
+  });
+
+  /**
+   * GET /api/prices/status
+   * Returns price availability status for all assets.
+   */
+  app.get("/api/prices/status", async (_req, res) => {
+    const allAssets = await storage.getAllAssets();
+    const statuses = [];
+    for (const asset of allAssets) {
+      const latest = await storage.getLatestPricePoint(asset.id);
+      const totalPoints = (await storage.getPricePointsByAsset(asset.id)).length;
+      statuses.push({
+        assetId: asset.id,
+        assetName: asset.name,
+        sourceType: asset.sourceType,
+        symbol: asset.symbol,
+        hasPriceData: asset.sourceType === "cash" || totalPoints > 0,
+        latestPrice: asset.sourceType === "cash" ? 1.0 : (latest?.pricePerUnit || null),
+        latestDate: asset.sourceType === "cash" ? "immer" : (latest?.timestamp?.slice(0, 10) || null),
+        totalPoints: asset.sourceType === "cash" ? -1 : totalPoints,
+      });
+    }
+    res.json(statuses);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
   // Import / Export
   // ═══════════════════════════════════════════════════════════════════
 
@@ -294,6 +357,8 @@ export async function registerRoutes(
           assetId: h.assetId || h.asset_id,
           quantity: h.quantity,
           unit: h.unit || "Stück",
+          validFrom: h.validFrom || h.valid_from || "",
+          validTo: h.validTo || h.valid_to || null,
         })),
         pricePoints: data.pricePoints.map((pp: any) => ({
           assetId: pp.assetId || pp.asset_id,

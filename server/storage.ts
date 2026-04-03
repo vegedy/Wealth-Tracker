@@ -42,6 +42,8 @@ sqlite.exec(`
     asset_id INTEGER NOT NULL,
     quantity REAL NOT NULL,
     unit TEXT NOT NULL DEFAULT 'Stück',
+    valid_from TEXT NOT NULL DEFAULT '',
+    valid_to TEXT,
     created_at TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT ''
   );
@@ -54,6 +56,10 @@ sqlite.exec(`
     created_at TEXT NOT NULL DEFAULT ''
   );
 `);
+
+// Migrate: add new columns if they don't exist (for existing databases)
+try { sqlite.exec(`ALTER TABLE holdings ADD COLUMN valid_from TEXT NOT NULL DEFAULT ''`); } catch {}
+try { sqlite.exec(`ALTER TABLE holdings ADD COLUMN valid_to TEXT`); } catch {}
 
 export const db = drizzle(sqlite);
 

@@ -6,6 +6,7 @@
  * 2. Merging uneven time grids to a daily resolution
  * 3. Aggregating area totals and overall totals in EUR
  * 4. Calculating percentage distributions
+ * 5. Respecting holding validity periods (validFrom / validTo)
  *
  * INTERPOLATION LOGIC:
  * - For cash assets (source_type = "cash"): price is always 1.00 EUR/unit, no interpolation needed.
@@ -15,6 +16,12 @@
  * - For assets with a single price point: that value is used as a constant.
  * - For timestamps before the first known point: the first known price is used (flat extrapolation).
  * - For timestamps after the last known point: the last known price is used (flat extrapolation).
+ *
+ * HOLDING VALIDITY:
+ * - Each holding has a validFrom (YYYY-MM-DD) and optional validTo (YYYY-MM-DD).
+ * - A holding only contributes to the portfolio value on dates where:
+ *     date >= validFrom AND (validTo is null OR date <= validTo)
+ * - If validFrom is empty, the holding is treated as always active (backward compat).
  *
  * All values are in EUR.
  */
@@ -44,6 +51,21 @@ export interface AreaDistribution {
   areaName: string;
   value: number; // EUR
   percent: number;
+}
+
+/**
+ * Check if a holding is active on a given date.
+ */
+export function isHoldingActiveOnDate(holding: Holding, date: string): boolean {
+  // If validFrom is empty/not set, treat as always active (backward compat)
+  if (holding.validFrom && holding.validFrom !== "") {
+    if (date < holding.validFrom) return false;
+  }
+  // If validTo is set, holding is inactive after that date
+  if (holding.validTo && holding.validTo !== "") {
+    if (date > holding.validTo) return false;
+  }
+  return true;
 }
 
 /**
@@ -103,6 +125,7 @@ export function generateDateRange(from: string, to: string): string[] {
 
 /**
  * Compute time series for the total value of one area.
+ * Only includes holdings that are active on each date.
  */
 export function computeAreaTimeSeries(
   area: Area,
@@ -114,6 +137,7 @@ export function computeAreaTimeSeries(
   return dateRange.map((date) => {
     let totalValue = 0;
     for (const h of holdingsInArea) {
+      if (!isHoldingActiveOnDate(h, date)) continue;
       const asset = assetsMap.get(h.assetId);
       if (!asset) continue;
       const isCash = asset.sourceType === "cash";
@@ -145,6 +169,7 @@ export function computeTotalTimeSeries(
 
 /**
  * Compute percentage distribution of areas at a given date.
+ * Only counts holdings active on that date.
  */
 export function computeAreaDistribution(
   areas: Area[],
@@ -160,6 +185,7 @@ export function computeAreaDistribution(
     const holdingsInArea = holdingsMap.get(area.id) || [];
     let areaValue = 0;
     for (const h of holdingsInArea) {
+      if (!isHoldingActiveOnDate(h, date)) continue;
       const asset = assetsMap.get(h.assetId);
       if (!asset) continue;
       const isCash = asset.sourceType === "cash";
@@ -180,6 +206,7 @@ export function computeAreaDistribution(
 
 /**
  * Compute percentage distribution of assets within one area at a given date.
+ * Only counts holdings active on that date.
  */
 export function computeAssetDistributionInArea(
   holdingsInArea: Holding[],
@@ -191,6 +218,7 @@ export function computeAssetDistributionInArea(
   let total = 0;
 
   for (const h of holdingsInArea) {
+    if (!isHoldingActiveOnDate(h, date)) continue;
     const asset = assetsMap.get(h.assetId);
     if (!asset) continue;
     const isCash = asset.sourceType === "cash";
