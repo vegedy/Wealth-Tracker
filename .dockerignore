@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Database
+data.db
+data.db-wal
+data.db-shm
+*.db
+
+# Logs
+*.log
+
+# Git
+.git/
+.gitignore
+
+# Dev/editor files
+.env*
+.DS_Store
+*.local
+
+# Screenshots / tmp
+screenshots/
+/tmp/
