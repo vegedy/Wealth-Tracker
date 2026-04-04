@@ -6,7 +6,7 @@
  * 2. Merging uneven time grids to a daily resolution
  * 3. Aggregating area totals and overall totals in EUR
  * 4. Calculating percentage distributions
- * 5. Respecting holding validity periods (validFrom / validTo)
+ * 5. Respecting holding entry validity periods (validFrom / validTo)
  *
  * INTERPOLATION LOGIC:
  * - For cash assets (source_type = "cash"): price is always 1.00 EUR/unit, no interpolation needed.
@@ -17,16 +17,16 @@
  * - For timestamps before the first known point: the first known price is used (flat extrapolation).
  * - For timestamps after the last known point: the last known price is used (flat extrapolation).
  *
- * HOLDING VALIDITY:
- * - Each holding has a validFrom (YYYY-MM-DD) and optional validTo (YYYY-MM-DD).
- * - A holding only contributes to the portfolio value on dates where:
+ * HOLDING ENTRY VALIDITY:
+ * - Each HoldingEntry has a validFrom (YYYY-MM-DD) and optional validTo (YYYY-MM-DD).
+ * - An entry only contributes to the portfolio value on dates where:
  *     date >= validFrom AND (validTo is null OR date <= validTo)
- * - If validFrom is empty, the holding is treated as always active (backward compat).
+ * - Quantity is NOT interpolated — it's a step function (exact value for the period).
  *
  * All values are in EUR.
  */
 
-import type { Area, Asset, Holding, PricePoint } from "../shared/schema";
+import type { Area, Asset, Holding, HoldingEntry, PricePoint } from "../shared/schema";
 
 export interface TimeSeriesPoint {
   date: string; // YYYY-MM-DD
@@ -54,14 +54,22 @@ export interface AreaDistribution {
 }
 
 /**
- * Check if a holding is active on a given date.
+ * Check if a HoldingEntry is active on a given date.
+ */
+export function isEntryActiveOnDate(entry: HoldingEntry, date: string): boolean {
+  if (!entry.validFrom || entry.validFrom === "") return true; // legacy compat
+  if (date < entry.validFrom) return false;
+  if (entry.validTo && entry.validTo !== "" && date > entry.validTo) return false;
+  return true;
+}
+
+/**
+ * Backward-compat: check if a legacy Holding (without entries) is active on a date.
  */
 export function isHoldingActiveOnDate(holding: Holding, date: string): boolean {
-  // If validFrom is empty/not set, treat as always active (backward compat)
   if (holding.validFrom && holding.validFrom !== "") {
     if (date < holding.validFrom) return false;
   }
-  // If validTo is set, holding is inactive after that date
   if (holding.validTo && holding.validTo !== "") {
     if (date > holding.validTo) return false;
   }
@@ -124,26 +132,56 @@ export function generateDateRange(from: string, to: string): string[] {
 }
 
 /**
+ * Get the effective quantity of a holding on a given date by checking its entries.
+ * Returns 0 if no entry covers the date.
+ */
+export function getQuantityOnDate(
+  entries: HoldingEntry[],
+  date: string
+): number {
+  let qty = 0;
+  for (const entry of entries) {
+    if (isEntryActiveOnDate(entry, date)) {
+      qty += entry.quantity;
+    }
+  }
+  return qty;
+}
+
+/**
  * Compute time series for the total value of one area.
- * Only includes holdings that are active on each date.
+ * Uses HoldingEntries for quantity at each date.
  */
 export function computeAreaTimeSeries(
   area: Area,
   holdingsInArea: Holding[],
   assetsMap: Map<number, Asset>,
   pricePointsMap: Map<number, PricePoint[]>,
+  entriesMap: Map<number, HoldingEntry[]>, // holdingId → entries
   dateRange: string[]
 ): TimeSeriesPoint[] {
   return dateRange.map((date) => {
     let totalValue = 0;
     for (const h of holdingsInArea) {
-      if (!isHoldingActiveOnDate(h, date)) continue;
       const asset = assetsMap.get(h.assetId);
       if (!asset) continue;
       const isCash = asset.sourceType === "cash";
       const pps = pricePointsMap.get(h.assetId) || [];
+      const entries = entriesMap.get(h.id) || [];
+
+      let quantity: number;
+      if (entries.length > 0) {
+        // New system: sum active entries for this date
+        quantity = getQuantityOnDate(entries, date);
+      } else {
+        // Legacy fallback: use holding's own quantity/validFrom/validTo
+        if (!isHoldingActiveOnDate(h, date)) continue;
+        quantity = h.quantity;
+      }
+
+      if (quantity === 0) continue;
       const pricePerUnit = interpolatePrice(date, pps, isCash);
-      totalValue += h.quantity * pricePerUnit;
+      totalValue += quantity * pricePerUnit;
     }
     return { date, value: Math.round(totalValue * 100) / 100 };
   });
@@ -169,13 +207,13 @@ export function computeTotalTimeSeries(
 
 /**
  * Compute percentage distribution of areas at a given date.
- * Only counts holdings active on that date.
  */
 export function computeAreaDistribution(
   areas: Area[],
   holdingsMap: Map<number, Holding[]>,
   assetsMap: Map<number, Asset>,
   pricePointsMap: Map<number, PricePoint[]>,
+  entriesMap: Map<number, HoldingEntry[]>,
   date: string
 ): AreaDistribution[] {
   const results: AreaDistribution[] = [];
@@ -185,13 +223,22 @@ export function computeAreaDistribution(
     const holdingsInArea = holdingsMap.get(area.id) || [];
     let areaValue = 0;
     for (const h of holdingsInArea) {
-      if (!isHoldingActiveOnDate(h, date)) continue;
       const asset = assetsMap.get(h.assetId);
       if (!asset) continue;
       const isCash = asset.sourceType === "cash";
       const pps = pricePointsMap.get(h.assetId) || [];
+      const entries = entriesMap.get(h.id) || [];
+
+      let quantity: number;
+      if (entries.length > 0) {
+        quantity = getQuantityOnDate(entries, date);
+      } else {
+        if (!isHoldingActiveOnDate(h, date)) continue;
+        quantity = h.quantity;
+      }
+      if (quantity === 0) continue;
       const pricePerUnit = interpolatePrice(date, pps, isCash);
-      areaValue += h.quantity * pricePerUnit;
+      areaValue += quantity * pricePerUnit;
     }
     results.push({ areaId: area.id, areaName: area.name, value: Math.round(areaValue * 100) / 100, percent: 0 });
     total += areaValue;
@@ -206,25 +253,34 @@ export function computeAreaDistribution(
 
 /**
  * Compute percentage distribution of assets within one area at a given date.
- * Only counts holdings active on that date.
  */
 export function computeAssetDistributionInArea(
   holdingsInArea: Holding[],
   assetsMap: Map<number, Asset>,
   pricePointsMap: Map<number, PricePoint[]>,
+  entriesMap: Map<number, HoldingEntry[]>,
   date: string
 ): AssetDistribution[] {
   const results: AssetDistribution[] = [];
   let total = 0;
 
   for (const h of holdingsInArea) {
-    if (!isHoldingActiveOnDate(h, date)) continue;
     const asset = assetsMap.get(h.assetId);
     if (!asset) continue;
     const isCash = asset.sourceType === "cash";
     const pps = pricePointsMap.get(h.assetId) || [];
+    const entries = entriesMap.get(h.id) || [];
+
+    let quantity: number;
+    if (entries.length > 0) {
+      quantity = getQuantityOnDate(entries, date);
+    } else {
+      if (!isHoldingActiveOnDate(h, date)) continue;
+      quantity = h.quantity;
+    }
+    if (quantity === 0) continue;
     const pricePerUnit = interpolatePrice(date, pps, isCash);
-    const value = h.quantity * pricePerUnit;
+    const value = quantity * pricePerUnit;
     results.push({ assetId: h.assetId, assetName: asset.name, value: Math.round(value * 100) / 100, percent: 0 });
     total += value;
   }
