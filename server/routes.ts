@@ -11,7 +11,7 @@ import {
   type AreaTimeSeries,
 } from "./timeseries";
 import { fetchAllMarketPrices, fetchPricesForAsset } from "./price-fetcher";
-import type { Asset, Holding, PricePoint } from "../shared/schema";
+import type { Asset, Holding, HoldingEntry, PricePoint } from "../shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -95,7 +95,7 @@ export async function registerRoutes(
   });
 
   // ═══════════════════════════════════════════════════════════════════
-  // Holdings CRUD
+  // Holdings CRUD (containers)
   // ═══════════════════════════════════════════════════════════════════
   app.get("/api/holdings", async (_req, res) => {
     const data = await storage.getAllHoldings();
@@ -124,6 +124,44 @@ export async function registerRoutes(
   });
 
   // ═══════════════════════════════════════════════════════════════════
+  // HoldingEntries (quantity history)
+  // ═══════════════════════════════════════════════════════════════════
+
+  /** GET /api/holding-entries/holding/:holdingId — entries for one holding */
+  app.get("/api/holding-entries/holding/:holdingId", async (req, res) => {
+    const data = await storage.getEntriesByHolding(Number(req.params.holdingId));
+    res.json(data);
+  });
+
+  /** POST /api/holding-entries — create new entry */
+  app.post("/api/holding-entries", async (req, res) => {
+    const entry = await storage.createHoldingEntry(req.body);
+    res.status(201).json(entry);
+  });
+
+  /** PATCH /api/holding-entries/:id — update entry (quantity, dates, note) */
+  app.patch("/api/holding-entries/:id", async (req, res) => {
+    const entry = await storage.updateHoldingEntry(Number(req.params.id), req.body);
+    if (!entry) return res.status(404).json({ message: "Entry not found" });
+    res.json(entry);
+  });
+
+  /** POST /api/holding-entries/:id/close — set validTo on an entry */
+  app.post("/api/holding-entries/:id/close", async (req, res) => {
+    const { validTo } = req.body;
+    if (!validTo) return res.status(400).json({ message: "validTo ist erforderlich" });
+    const entry = await storage.closeHoldingEntry(Number(req.params.id), validTo);
+    if (!entry) return res.status(404).json({ message: "Entry not found" });
+    res.json(entry);
+  });
+
+  /** DELETE /api/holding-entries/:id */
+  app.delete("/api/holding-entries/:id", async (req, res) => {
+    await storage.deleteHoldingEntry(Number(req.params.id));
+    res.status(204).send();
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
   // PricePoints
   // ═══════════════════════════════════════════════════════════════════
   app.get("/api/price-points/asset/:assetId", async (req, res) => {
@@ -145,10 +183,7 @@ export async function registerRoutes(
   // Time Series & Distribution API
   // ═══════════════════════════════════════════════════════════════════
 
-  /**
-   * GET /api/timeseries?from=YYYY-MM-DD&to=YYYY-MM-DD
-   * Returns area-level and total portfolio time series.
-   */
+  /** GET /api/timeseries?from=YYYY-MM-DD&to=YYYY-MM-DD */
   app.get("/api/timeseries", async (req, res) => {
     const from = (req.query.from as string) || "2025-01-01";
     const to = (req.query.to as string) || new Date().toISOString().slice(0, 10);
@@ -157,6 +192,7 @@ export async function registerRoutes(
     const allAreas = await storage.getAllAreas();
     const allAssets = await storage.getAllAssets();
     const allHoldings = await storage.getAllHoldings();
+    const allEntries = await storage.getAllHoldingEntries();
     const allPricePoints = await storage.getAllPricePoints();
 
     const assetsMap = new Map<number, Asset>();
@@ -167,6 +203,13 @@ export async function registerRoutes(
       const arr = holdingsMap.get(h.areaId) || [];
       arr.push(h);
       holdingsMap.set(h.areaId, arr);
+    }
+
+    const entriesMap = new Map<number, HoldingEntry[]>();
+    for (const e of allEntries) {
+      const arr = entriesMap.get(e.holdingId) || [];
+      arr.push(e);
+      entriesMap.set(e.holdingId, arr);
     }
 
     const pricePointsMap = new Map<number, PricePoint[]>();
@@ -179,24 +222,28 @@ export async function registerRoutes(
     const areaSeries: AreaTimeSeries[] = allAreas.map((area) => ({
       areaId: area.id,
       areaName: area.name,
-      series: computeAreaTimeSeries(area, holdingsMap.get(area.id) || [], assetsMap, pricePointsMap, dateRange),
+      series: computeAreaTimeSeries(
+        area,
+        holdingsMap.get(area.id) || [],
+        assetsMap,
+        pricePointsMap,
+        entriesMap,
+        dateRange
+      ),
     }));
 
     const totalSeries = computeTotalTimeSeries(areaSeries);
-
     res.json({ areaSeries, totalSeries });
   });
 
-  /**
-   * GET /api/distribution/areas?date=YYYY-MM-DD
-   * Returns percentage distribution of areas at a given date.
-   */
+  /** GET /api/distribution/areas?date=YYYY-MM-DD */
   app.get("/api/distribution/areas", async (req, res) => {
     const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
 
     const allAreas = await storage.getAllAreas();
     const allAssets = await storage.getAllAssets();
     const allHoldings = await storage.getAllHoldings();
+    const allEntries = await storage.getAllHoldingEntries();
     const allPricePoints = await storage.getAllPricePoints();
 
     const assetsMap = new Map<number, Asset>();
@@ -209,6 +256,13 @@ export async function registerRoutes(
       holdingsMap.set(h.areaId, arr);
     }
 
+    const entriesMap = new Map<number, HoldingEntry[]>();
+    for (const e of allEntries) {
+      const arr = entriesMap.get(e.holdingId) || [];
+      arr.push(e);
+      entriesMap.set(e.holdingId, arr);
+    }
+
     const pricePointsMap = new Map<number, PricePoint[]>();
     for (const pp of allPricePoints) {
       const arr = pricePointsMap.get(pp.assetId) || [];
@@ -216,24 +270,29 @@ export async function registerRoutes(
       pricePointsMap.set(pp.assetId, arr);
     }
 
-    const distribution = computeAreaDistribution(allAreas, holdingsMap, assetsMap, pricePointsMap, date);
+    const distribution = computeAreaDistribution(allAreas, holdingsMap, assetsMap, pricePointsMap, entriesMap, date);
     res.json(distribution);
   });
 
-  /**
-   * GET /api/distribution/area/:areaId?date=YYYY-MM-DD
-   * Returns percentage distribution of assets within an area.
-   */
+  /** GET /api/distribution/area/:areaId?date=YYYY-MM-DD */
   app.get("/api/distribution/area/:areaId", async (req, res) => {
     const areaId = Number(req.params.areaId);
     const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
 
     const allAssets = await storage.getAllAssets();
     const holdingsInArea = await storage.getHoldingsByArea(areaId);
+    const allEntries = await storage.getAllHoldingEntries();
     const allPricePoints = await storage.getAllPricePoints();
 
     const assetsMap = new Map<number, Asset>();
     for (const a of allAssets) assetsMap.set(a.id, a);
+
+    const entriesMap = new Map<number, HoldingEntry[]>();
+    for (const e of allEntries) {
+      const arr = entriesMap.get(e.holdingId) || [];
+      arr.push(e);
+      entriesMap.set(e.holdingId, arr);
+    }
 
     const pricePointsMap = new Map<number, PricePoint[]>();
     for (const pp of allPricePoints) {
@@ -242,7 +301,7 @@ export async function registerRoutes(
       pricePointsMap.set(pp.assetId, arr);
     }
 
-    const distribution = computeAssetDistributionInArea(holdingsInArea, assetsMap, pricePointsMap, date);
+    const distribution = computeAssetDistributionInArea(holdingsInArea, assetsMap, pricePointsMap, entriesMap, date);
     res.json(distribution);
   });
 
@@ -250,19 +309,11 @@ export async function registerRoutes(
   // Price Fetching
   // ═══════════════════════════════════════════════════════════════════
 
-  /**
-   * POST /api/prices/fetch-all
-   * Manually trigger price fetch for all market assets.
-   */
   app.post("/api/prices/fetch-all", async (_req, res) => {
     const result = await fetchAllMarketPrices();
     res.json(result);
   });
 
-  /**
-   * POST /api/prices/fetch/:assetId
-   * Fetch prices for a single asset.
-   */
   app.post("/api/prices/fetch/:assetId", async (req, res) => {
     const asset = await storage.getAsset(Number(req.params.assetId));
     if (!asset) return res.status(404).json({ message: "Asset not found" });
@@ -270,10 +321,6 @@ export async function registerRoutes(
     res.json(result);
   });
 
-  /**
-   * GET /api/prices/status
-   * Returns price availability status for all assets.
-   */
   app.get("/api/prices/status", async (_req, res) => {
     const allAssets = await storage.getAllAssets();
     const statuses = [];
@@ -298,23 +345,21 @@ export async function registerRoutes(
   // Import / Export
   // ═══════════════════════════════════════════════════════════════════
 
-  /**
-   * GET /api/export
-   * Download full database as JSON.
-   */
   app.get("/api/export", async (_req, res) => {
     const allAreas = await storage.getAllAreas();
     const allAssets = await storage.getAllAssets();
     const allHoldings = await storage.getAllHoldings();
+    const allEntries = await storage.getAllHoldingEntries();
     const allPricePoints = await storage.getAllPricePoints();
 
     const exportData = {
-      version: "1.0",
+      version: "2.0",
       exportedAt: new Date().toISOString(),
       currency: "EUR",
       areas: allAreas,
       assets: allAssets,
       holdings: allHoldings,
+      holdingEntries: allEntries,
       pricePoints: allPricePoints,
     };
 
@@ -323,15 +368,10 @@ export async function registerRoutes(
     res.json(exportData);
   });
 
-  /**
-   * POST /api/import
-   * Import JSON data. Query param ?mode=replace (default) or ?mode=append.
-   */
   app.post("/api/import", async (req, res) => {
     const mode = (req.query.mode as string) || "replace";
     const data = req.body;
 
-    // Validate structure
     if (!data || !Array.isArray(data.areas) || !Array.isArray(data.assets) ||
         !Array.isArray(data.holdings) || !Array.isArray(data.pricePoints)) {
       return res.status(400).json({
@@ -355,10 +395,17 @@ export async function registerRoutes(
         holdings: data.holdings.map((h: any) => ({
           areaId: h.areaId || h.area_id,
           assetId: h.assetId || h.asset_id,
-          quantity: h.quantity,
+          quantity: h.quantity ?? 0,
           unit: h.unit || "Stück",
           validFrom: h.validFrom || h.valid_from || "",
           validTo: h.validTo || h.valid_to || null,
+        })),
+        holdingEntries: (data.holdingEntries || []).map((e: any) => ({
+          holdingId: e.holdingId || e.holding_id,
+          quantity: e.quantity,
+          validFrom: e.validFrom || e.valid_from,
+          validTo: e.validTo || e.valid_to || null,
+          note: e.note || null,
         })),
         pricePoints: data.pricePoints.map((pp: any) => ({
           assetId: pp.assetId || pp.asset_id,
