@@ -98,7 +98,38 @@ Alle Zeitreihen werden auf ein tägliches Raster gemappt. Pro Tag wird für jede
 
 Alle Werte sind ausschließlich in EUR.
 
-## Setup & Start
+## Docker (empfohlen)
+
+Das Image wird bei jedem Push auf `main` automatisch gebaut und in der GitHub Container Registry veröffentlicht:
+
+```bash
+# Image pullen
+docker pull ghcr.io/vegedy/wealth-tracker:latest
+
+# Container starten (Datenbank wird persistent in ./data gespeichert)
+docker run -d \
+  --name wealth-tracker \
+  -p 5000:5000 \
+  -v $(pwd)/data:/app/data \
+  ghcr.io/vegedy/wealth-tracker:latest
+```
+
+Die App ist dann unter `http://localhost:5000` erreichbar.
+
+### Docker Compose
+
+```yaml
+services:
+  wealth-tracker:
+    image: ghcr.io/vegedy/wealth-tracker:latest
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+```
+
+## Lokales Setup & Start
 
 ```bash
 # Dependencies installieren
