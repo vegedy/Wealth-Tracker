@@ -42,16 +42,17 @@ export type InsertAsset = z.infer<typeof insertAssetSchema>;
 export type Asset = typeof assets.$inferSelect;
 
 // ── Holdings ───────────────────────────────────────────────────────
-// validFrom: date (YYYY-MM-DD) when this holding became active
-// validTo: date (YYYY-MM-DD) when this holding was sold/removed (null = still active)
+// A Holding is a "container" linking an Area to an Asset (+ unit).
+// The actual quantity over time is tracked in HoldingEntries.
 export const holdings = sqliteTable("holdings", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   areaId: integer("area_id").notNull(),
   assetId: integer("asset_id").notNull(),
-  quantity: real("quantity").notNull(),
   unit: text("unit").notNull().default("Stück"),
-  validFrom: text("valid_from").notNull().default(""), // YYYY-MM-DD
-  validTo: text("valid_to"), // YYYY-MM-DD or null (= still held)
+  // Legacy fields kept for backward compat / migration — not used in new logic
+  quantity: real("quantity").notNull().default(0),
+  validFrom: text("valid_from").notNull().default(""),
+  validTo: text("valid_to"),
   createdAt: text("created_at").notNull().default(""),
   updatedAt: text("updated_at").notNull().default(""),
 });
@@ -63,6 +64,28 @@ export const insertHoldingSchema = createInsertSchema(holdings).omit({
 });
 export type InsertHolding = z.infer<typeof insertHoldingSchema>;
 export type Holding = typeof holdings.$inferSelect;
+
+// ── HoldingEntries ─────────────────────────────────────────────────
+// Each entry represents a quantity of a holding for a specific time window.
+// validFrom: YYYY-MM-DD — when this quantity became active (required)
+// validTo:   YYYY-MM-DD — when this quantity ended (null = still current)
+// No interpolation — each entry represents an exact quantity for its period.
+export const holdingEntries = sqliteTable("holding_entries", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  holdingId: integer("holding_id").notNull(),
+  quantity: real("quantity").notNull(),
+  validFrom: text("valid_from").notNull(), // YYYY-MM-DD
+  validTo: text("valid_to"),              // YYYY-MM-DD or null
+  note: text("note"),                     // optional comment (e.g. "Kauf", "Verkauf")
+  createdAt: text("created_at").notNull().default(""),
+});
+
+export const insertHoldingEntrySchema = createInsertSchema(holdingEntries).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertHoldingEntry = z.infer<typeof insertHoldingEntrySchema>;
+export type HoldingEntry = typeof holdingEntries.$inferSelect;
 
 // ── PricePoints ────────────────────────────────────────────────────
 export const pricePoints = sqliteTable("price_points", {
