@@ -314,27 +314,59 @@ export class DatabaseStorage implements IStorage {
   }
 
   async bulkImport(data: {
-    areas: InsertArea[];
-    assets: InsertAsset[];
-    holdings: InsertHolding[];
+    areas: (InsertArea & { id?: number })[];
+    assets: (InsertAsset & { id?: number })[];
+    holdings: (InsertHolding & { id?: number })[];
     holdingEntries: InsertHoldingEntry[];
     pricePoints: InsertPricePoint[];
   }) {
     const ts = now();
+
+    // ── Step 1: Insert areas, build oldId → newId map ──
+    const areaIdMap = new Map<number, number>();
     for (const a of data.areas) {
-      db.insert(areas).values({ ...a, createdAt: ts, updatedAt: ts }).run();
+      const oldId = a.id;
+      const { id: _id, ...rest } = a as any;
+      const inserted = db.insert(areas).values({ ...rest, createdAt: ts, updatedAt: ts }).returning().get();
+      if (oldId != null) areaIdMap.set(oldId, inserted.id);
     }
+
+    // ── Step 2: Insert assets, build oldId → newId map ──
+    const assetIdMap = new Map<number, number>();
     for (const a of data.assets) {
-      db.insert(assets).values({ ...a, createdAt: ts, updatedAt: ts }).run();
+      const oldId = (a as any).id;
+      const { id: _id, ...rest } = a as any;
+      const inserted = db.insert(assets).values({ ...rest, createdAt: ts, updatedAt: ts }).returning().get();
+      if (oldId != null) assetIdMap.set(oldId, inserted.id);
     }
+
+    // ── Step 3: Insert holdings (re-map areaId + assetId), build oldId → newId map ──
+    const holdingIdMap = new Map<number, number>();
     for (const h of data.holdings) {
-      db.insert(holdings).values({ ...h, createdAt: ts, updatedAt: ts }).run();
+      const oldId = (h as any).id;
+      const { id: _id, ...rest } = h as any;
+      const newAreaId = areaIdMap.get(rest.areaId) ?? rest.areaId;
+      const newAssetId = assetIdMap.get(rest.assetId) ?? rest.assetId;
+      const inserted = db.insert(holdings).values({
+        ...rest,
+        areaId: newAreaId,
+        assetId: newAssetId,
+        createdAt: ts,
+        updatedAt: ts,
+      }).returning().get();
+      if (oldId != null) holdingIdMap.set(oldId, inserted.id);
     }
+
+    // ── Step 4: Insert holdingEntries (re-map holdingId) ──
     for (const e of data.holdingEntries || []) {
-      db.insert(holdingEntries).values({ ...e, createdAt: ts }).run();
+      const newHoldingId = holdingIdMap.get(e.holdingId) ?? e.holdingId;
+      db.insert(holdingEntries).values({ ...e, holdingId: newHoldingId, createdAt: ts }).run();
     }
+
+    // ── Step 5: Insert pricePoints (re-map assetId) ──
     for (const pp of data.pricePoints) {
-      db.insert(pricePoints).values({ ...pp, createdAt: ts }).run();
+      const newAssetId = assetIdMap.get(pp.assetId) ?? pp.assetId;
+      db.insert(pricePoints).values({ ...pp, assetId: newAssetId, createdAt: ts }).run();
     }
   }
 }

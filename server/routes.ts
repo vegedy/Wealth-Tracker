@@ -404,9 +404,16 @@ export async function registerRoutes(
       if (mode === "replace") {
         await storage.clearAll();
       }
+      // NOTE: id is passed through to bulkImport so it can build oldId→newId maps
+      // for re-mapping areaId/assetId/holdingId foreign keys.
       await storage.bulkImport({
-        areas: data.areas.map((a: any) => ({ name: a.name, description: a.description || null })),
+        areas: data.areas.map((a: any) => ({
+          id: a.id,
+          name: a.name,
+          description: a.description || null,
+        })),
         assets: data.assets.map((a: any) => ({
+          id: a.id,
           name: a.name,
           category: a.category || "custom",
           symbol: a.symbol || null,
@@ -414,6 +421,7 @@ export async function registerRoutes(
           metadata: a.metadata || null,
         })),
         holdings: data.holdings.map((h: any) => ({
+          id: h.id,
           areaId: h.areaId || h.area_id,
           assetId: h.assetId || h.asset_id,
           quantity: h.quantity ?? 0,
