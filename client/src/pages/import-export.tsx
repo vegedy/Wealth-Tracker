@@ -43,9 +43,13 @@ export default function ImportExportPage() {
         throw new Error("Ungültige JSON-Datei.");
       }
 
-      // Validate
+      // Validate — holdingEntries is optional (v2.0+), holdings is required
       if (!data.areas || !data.assets || !data.holdings || !data.pricePoints) {
         throw new Error("Ungültiges Format: areas, assets, holdings und pricePoints werden erwartet.");
+      }
+      // Warn if holdingEntries is missing (old v1 export) — import will still work
+      if (!data.holdingEntries || data.holdingEntries.length === 0) {
+        console.warn("Import: holdingEntries fehlt oder leer. Holdings werden ohne Mengen-Historie importiert.");
       }
 
       const res = await apiRequest("POST", `/api/import?mode=${importMode}`, data);
@@ -160,7 +164,7 @@ export default function ImportExportPage() {
         <CardContent>
           <pre className="text-xs text-muted-foreground bg-muted/50 p-3 rounded overflow-x-auto">
 {`{
-  "version": "1.0",
+  "version": "2.0",
   "currency": "EUR",
   "areas": [{ "name": "...", "description": "..." }],
   "assets": [{
@@ -172,8 +176,14 @@ export default function ImportExportPage() {
   "holdings": [{
     "areaId": 1,
     "assetId": 1,
-    "quantity": 200,
     "unit": "g"
+  }],
+  "holdingEntries": [{
+    "holdingId": 1,
+    "quantity": 200,
+    "validFrom": "2025-06-01",
+    "validTo": null,
+    "note": "Kauf"
   }],
   "pricePoints": [{
     "assetId": 1,

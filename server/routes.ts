@@ -133,8 +133,29 @@ export async function registerRoutes(
     res.json(data);
   });
 
-  /** POST /api/holding-entries — create new entry */
+  /** POST /api/holding-entries — create new entry, auto-closes any open entry */
   app.post("/api/holding-entries", async (req, res) => {
+    const { holdingId, validFrom } = req.body;
+
+    // Auto-close the currently open entry (validTo = null) for this holding.
+    // "Open" means validTo IS NULL and validFrom < new entry's validFrom.
+    // We set its validTo to one day before the new entry's validFrom.
+    if (holdingId && validFrom) {
+      const existingEntries = await storage.getEntriesByHolding(Number(holdingId));
+      // Find the open entry with the latest validFrom (the "current" one)
+      const openEntries = existingEntries.filter(e => !e.validTo && e.validFrom < validFrom);
+      const openEntry = openEntries.length > 0
+        ? openEntries.reduce((latest, e) => e.validFrom > latest.validFrom ? e : latest)
+        : null;
+      if (openEntry) {
+        // Calculate day before new entry's validFrom
+        const newFromDate = new Date(validFrom + "T00:00:00Z");
+        newFromDate.setUTCDate(newFromDate.getUTCDate() - 1);
+        const dayBefore = newFromDate.toISOString().slice(0, 10);
+        await storage.closeHoldingEntry(openEntry.id, dayBefore);
+      }
+    }
+
     const entry = await storage.createHoldingEntry(req.body);
     res.status(201).json(entry);
   });
