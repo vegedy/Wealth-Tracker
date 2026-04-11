@@ -208,12 +208,14 @@ export default function Dashboard() {
                 />
                 <RechartsTooltip
                   contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
+                    backgroundColor: "hsl(var(--popover))",
                     borderColor: "hsl(var(--border))",
                     borderRadius: "8px",
                     fontSize: 12,
-                    color: "hsl(var(--foreground))",
+                    color: "hsl(var(--popover-foreground))",
                   }}
+                  labelStyle={{ color: "hsl(var(--popover-foreground))", fontWeight: 600 }}
+                  itemStyle={{ color: "hsl(var(--popover-foreground))" }}
                   formatter={(value: number) => [formatEur(value), undefined]}
                   labelFormatter={(label) => new Date(label).toLocaleDateString("de-DE")}
                 />
@@ -264,12 +266,14 @@ export default function Dashboard() {
                   </Pie>
                   <RechartsTooltip
                     contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
+                      backgroundColor: "hsl(var(--popover))",
                       borderColor: "hsl(var(--border))",
                       borderRadius: "8px",
                       fontSize: 12,
-                      color: "hsl(var(--foreground))",
+                      color: "hsl(var(--popover-foreground))",
                     }}
+                    labelStyle={{ color: "hsl(var(--popover-foreground))", fontWeight: 600 }}
+                    itemStyle={{ color: "hsl(var(--popover-foreground))" }}
                     formatter={(value: number, name: string) => [formatEur(value), name]}
                   />
                   <Legend />

@@ -551,7 +551,9 @@ function HoldingsTab({ holdings, areas, assets }: { holdings?: Holding[]; areas?
                     ))}
                   </Pie>
                   <RechartsTooltip
-                    contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", borderRadius: "8px", fontSize: 12, color: "hsl(var(--foreground))" }}
+                    contentStyle={{ backgroundColor: "hsl(var(--popover))", borderColor: "hsl(var(--border))", borderRadius: "8px", fontSize: 12, color: "hsl(var(--popover-foreground))" }}
+                    labelStyle={{ color: "hsl(var(--popover-foreground))", fontWeight: 600 }}
+                    itemStyle={{ color: "hsl(var(--popover-foreground))" }}
                     formatter={(value: number, name: string) => [formatEur(value), name]}
                   />
                   <Legend />
