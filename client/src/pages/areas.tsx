@@ -8,13 +8,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Trash2, Package, Coins, BarChart3, RefreshCw,
   CheckCircle2, AlertTriangle, Calendar, XCircle, ChevronDown,
-  ChevronUp, Pencil, X, Check, History, Loader2, Search
+  ChevronUp, Pencil, X, Check, History, Loader2, Search, Info
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend
@@ -322,7 +323,37 @@ function AssetsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: Pr
             {/* Symbol/Ticker — nur bei known_market_asset */}
             {needsSymbol ? (
               <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Symbol / Ticker</label>
+                <div className="flex items-center gap-1">
+                  <label className="text-xs text-muted-foreground">Symbol / Ticker</label>
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="h-3 w-3 text-muted-foreground cursor-help shrink-0" />
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-[280px] text-xs space-y-2 p-3">
+                        <p className="font-semibold">Yahoo Finance Ticker-Format</p>
+                        <p className="text-muted-foreground">WKNs werden nicht unterstützt. Bitte den Börsen-Ticker verwenden:</p>
+                        <div className="space-y-1">
+                          <p className="font-medium">ETFs (XETRA, empfohlen):</p>
+                          <p className="text-muted-foreground">SXR8.DE → iShares Core S&P 500<br/>EUNL.DE → iShares MSCI World<br/>VWCE.DE → Vanguard FTSE All-World<br/>EXS1.DE → iShares Core DAX</p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="font-medium">Aktien:</p>
+                          <p className="text-muted-foreground">AAPL, MSFT → US-Börse (USD→EUR)<br/>SAP.DE → XETRA (EUR direkt)</p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="font-medium">Edelmetalle:</p>
+                          <p className="text-muted-foreground">XAU → Gold (pro Gramm)<br/>XAG → Silber (pro Gramm)</p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="font-medium">Krypto:</p>
+                          <p className="text-muted-foreground">BTC-USD, ETH-USD</p>
+                        </div>
+                        <p className="text-muted-foreground border-t pt-1">Tipp: Ticker auf finance.yahoo.com suchen, dann &quot;.DE&quot; für XETRA anhängen.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
                 <div className="relative">
                   <Input
                     placeholder="z.B. AAPL, MSFT, XAU"
