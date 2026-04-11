@@ -191,6 +191,9 @@ function AssetsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: Pr
   const [tickerInfo, setTickerInfo] = useState<TickerInfo | null>(null);
   const [tickerLoading, setTickerLoading] = useState(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track whether the current name was auto-filled from a ticker lookup
+  // so we can overwrite it on the next successful lookup
+  const nameAutoFilled = useRef(false);
 
   const needsSymbol = SYMBOL_REQUIRED_SOURCES.includes(sourceType);
 
@@ -243,16 +246,25 @@ function AssetsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: Pr
     }, 600);
   }
 
-  // Auto-fill name from ticker if name is still empty
+  // Auto-fill name from ticker lookup:
+  // overwrite if name is empty OR was previously auto-filled (not manually typed)
   useEffect(() => {
-    if (tickerInfo?.valid && tickerInfo.shortName && !name.trim()) {
-      setName(tickerInfo.shortName);
+    if (tickerInfo?.valid && tickerInfo.shortName) {
+      if (!name.trim() || nameAutoFilled.current) {
+        setName(tickerInfo.shortName);
+        nameAutoFilled.current = true;
+      }
+    }
+    // Reset auto-fill flag when lookup returns invalid
+    if (tickerInfo && !tickerInfo.valid) {
+      nameAutoFilled.current = false;
     }
   }, [tickerInfo]);
 
   function resetForm() {
     setName(""); setSymbol(""); setCategory("stock"); setSourceType("known_market_asset");
     setTickerInfo(null); setTickerLoading(false);
+    nameAutoFilled.current = false;
   }
 
   const createMutation = useMutation({
@@ -364,7 +376,7 @@ function AssetsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: Pr
               <Input
                 placeholder={tickerInfo?.valid ? tickerInfo.shortName || "Name" : "Name"}
                 value={name}
-                onChange={e => setName(e.target.value)}
+                onChange={e => { setName(e.target.value); nameAutoFilled.current = false; }}
                 data-testid="input-asset-name"
               />
             </div>
