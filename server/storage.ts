@@ -5,6 +5,7 @@ import {
   type Holding, type InsertHolding, holdings,
   type HoldingEntry, type InsertHoldingEntry, holdingEntries,
   type PricePoint, type InsertPricePoint, pricePoints,
+  settings,
 } from "../shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
@@ -65,6 +66,10 @@ sqlite.exec(`
     price_per_unit REAL NOT NULL,
     source TEXT NOT NULL DEFAULT 'manual',
     created_at TEXT NOT NULL DEFAULT ''
+  );
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
   );
 `);
 
@@ -368,6 +373,18 @@ export class DatabaseStorage implements IStorage {
       const newAssetId = assetIdMap.get(pp.assetId) ?? pp.assetId;
       db.insert(pricePoints).values({ ...pp, assetId: newAssetId, createdAt: ts }).run();
     }
+  }
+
+  // ── Settings ──────────────────────────────────────────────────────────
+  getSetting(key: string): string | null {
+    const row = db.select().from(settings).where(eq(settings.key, key)).get();
+    return row?.value ?? null;
+  }
+
+  setSetting(key: string, value: string): void {
+    db.insert(settings).values({ key, value })
+      .onConflictDoUpdate({ target: settings.key, set: { value } })
+      .run();
   }
 }
 

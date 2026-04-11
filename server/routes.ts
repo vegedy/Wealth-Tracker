@@ -423,6 +423,21 @@ export async function registerRoutes(
   });
 
   // ═══════════════════════════════════════════════════════════════════
+  // Settings
+  // ═══════════════════════════════════════════════════════════════════
+  app.get("/api/settings/:key", (req, res) => {
+    const value = storage.getSetting(req.params.key);
+    res.json({ key: req.params.key, value });
+  });
+
+  app.post("/api/settings/:key", (req, res) => {
+    const { value } = req.body;
+    if (typeof value !== "string") return res.status(400).json({ error: "value must be a string" });
+    storage.setSetting(req.params.key, value);
+    res.json({ key: req.params.key, value });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
   // Import / Export
   // ═══════════════════════════════════════════════════════════════════
 

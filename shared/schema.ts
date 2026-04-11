@@ -109,6 +109,12 @@ export type PricePoint = typeof pricePoints.$inferSelect;
 export type SourceType = "known_market_asset" | "custom_manual" | "cash";
 export type AssetCategory = "stock" | "etf" | "crypto" | "metal" | "cash" | "custom";
 
+// ── App settings (key-value store) ──────────────────────────────────
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
 // Users table kept for template compatibility
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
