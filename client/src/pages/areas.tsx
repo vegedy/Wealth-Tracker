@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Trash2, Package, Coins, BarChart3, RefreshCw,
   CheckCircle2, AlertTriangle, Calendar, XCircle, ChevronDown,
-  ChevronUp, Pencil, X, Check, History
+  ChevronUp, Pencil, X, Check, History, Loader2, Search
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend
@@ -165,13 +165,95 @@ function AreasTab({ areas, isLoading }: { areas?: Area[]; isLoading: boolean }) 
   );
 }
 
+// ─── Ticker lookup result type ────────────────────────────────────────
+interface TickerInfo {
+  valid: boolean;
+  symbol?: string;
+  displaySymbol?: string;
+  shortName?: string;
+  longName?: string;
+  exchange?: string | null;
+  quoteType?: string | null;
+  currency?: string | null;
+  error?: string;
+}
+
+// Categories that require a ticker symbol
+const SYMBOL_REQUIRED_SOURCES = ["known_market_asset"];
+
 // ─── Assets Tab ──────────────────────────────────────────────────────
 function AssetsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: PriceStatus[] }) {
   const { toast } = useToast();
   const [name, setName] = useState("");
-  const [category, setCategory] = useState("custom");
+  const [category, setCategory] = useState("stock");
   const [symbol, setSymbol] = useState("");
-  const [sourceType, setSourceType] = useState("custom_manual");
+  const [sourceType, setSourceType] = useState("known_market_asset");
+  const [tickerInfo, setTickerInfo] = useState<TickerInfo | null>(null);
+  const [tickerLoading, setTickerLoading] = useState(false);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const needsSymbol = SYMBOL_REQUIRED_SOURCES.includes(sourceType);
+
+  // Auto-switch sourceType when category changes
+  useEffect(() => {
+    if (category === "cash") {
+      setSourceType("cash");
+      setSymbol("");
+      setTickerInfo(null);
+    } else if (category === "custom") {
+      setSourceType("custom_manual");
+      setSymbol("");
+      setTickerInfo(null);
+    } else {
+      // stock, etf, crypto, metal → default to market asset
+      if (sourceType === "cash") setSourceType("known_market_asset");
+    }
+  }, [category]);
+
+  // Reset ticker info when symbol is cleared or sourceType changes
+  useEffect(() => {
+    if (!needsSymbol || !symbol.trim()) {
+      setTickerInfo(null);
+      setTickerLoading(false);
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    }
+  }, [needsSymbol, symbol]);
+
+  // Debounced ticker lookup
+  function handleSymbolChange(val: string) {
+    setSymbol(val);
+    setTickerInfo(null);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    const trimmed = val.trim();
+    if (!trimmed || !needsSymbol) {
+      setTickerLoading(false);
+      return;
+    }
+    setTickerLoading(true);
+    debounceTimer.current = setTimeout(async () => {
+      try {
+        const res = await apiRequest("GET", `/api/assets/ticker-lookup?symbol=${encodeURIComponent(trimmed)}`);
+        const data: TickerInfo = await res.json();
+        setTickerInfo(data);
+      } catch {
+        setTickerInfo({ valid: false, error: "Verbindungsfehler" });
+      } finally {
+        setTickerLoading(false);
+      }
+    }, 600);
+  }
+
+  // Auto-fill name from ticker if name is still empty
+  useEffect(() => {
+    if (tickerInfo?.valid && tickerInfo.shortName && !name.trim()) {
+      setName(tickerInfo.shortName);
+    }
+  }, [tickerInfo]);
+
+  function resetForm() {
+    setName(""); setSymbol(""); setCategory("stock"); setSourceType("known_market_asset");
+    setTickerInfo(null); setTickerLoading(false);
+  }
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -180,7 +262,7 @@ function AssetsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: Pr
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
       queryClient.invalidateQueries({ queryKey: ["/api/prices/status"] });
-      setName(""); setSymbol("");
+      resetForm();
       toast({ title: "Asset erstellt" });
     },
   });
@@ -199,25 +281,99 @@ function AssetsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: Pr
     return priceStatus?.find(s => s.assetId === assetId);
   }
 
+  const canCreate = name.trim() && (!needsSymbol || symbol.trim()) && !createMutation.isPending;
+
   return (
     <>
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium flex items-center gap-2"><Plus className="h-4 w-4" /> Neues Asset anlegen</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            <Input placeholder="Name" value={name} onChange={e => setName(e.target.value)} data-testid="input-asset-name" />
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger data-testid="select-asset-category"><SelectValue /></SelectTrigger>
-              <SelectContent>{CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}</SelectContent>
-            </Select>
-            <Input placeholder="Symbol/Ticker" value={symbol} onChange={e => setSymbol(e.target.value)} data-testid="input-asset-symbol" />
-            <Select value={sourceType} onValueChange={setSourceType}>
-              <SelectTrigger data-testid="select-asset-source"><SelectValue /></SelectTrigger>
-              <SelectContent>{SOURCE_TYPES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
-            </Select>
-            <Button onClick={() => createMutation.mutate()} disabled={!name.trim() || createMutation.isPending} data-testid="button-create-asset">Erstellen</Button>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Kategorie */}
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Kategorie</label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger data-testid="select-asset-category"><SelectValue /></SelectTrigger>
+                <SelectContent>{CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            {/* Preisquelle */}
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Preisquelle</label>
+              <Select value={sourceType} onValueChange={v => { setSourceType(v); setSymbol(""); setTickerInfo(null); }} disabled={category === "cash"}>
+                <SelectTrigger data-testid="select-asset-source"><SelectValue /></SelectTrigger>
+                <SelectContent>{SOURCE_TYPES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            {/* Symbol/Ticker — nur bei known_market_asset */}
+            {needsSymbol ? (
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Symbol / Ticker</label>
+                <div className="relative">
+                  <Input
+                    placeholder="z.B. AAPL, MSFT, XAU"
+                    value={symbol}
+                    onChange={e => handleSymbolChange(e.target.value)}
+                    className={`pr-8 ${
+                      tickerInfo?.valid ? "border-green-500 focus-visible:ring-green-500" :
+                      tickerInfo && !tickerInfo.valid ? "border-red-500 focus-visible:ring-red-500" : ""
+                    }`}
+                    data-testid="input-asset-symbol"
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    {tickerLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : tickerInfo?.valid ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    ) : tickerInfo && !tickerInfo.valid ? (
+                      <XCircle className="h-4 w-4 text-red-500" />
+                    ) : symbol.trim() ? (
+                      <Search className="h-4 w-4" />
+                    ) : null}
+                  </div>
+                </div>
+                {/* Live-Feedback unter dem Eingabefeld */}
+                {tickerInfo?.valid && (
+                  <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1 mt-0.5">
+                    <CheckCircle2 className="h-3 w-3 shrink-0" />
+                    <span className="font-medium">{tickerInfo.shortName}</span>
+                    {tickerInfo.exchange && <span className="text-muted-foreground">· {tickerInfo.exchange}</span>}
+                    {tickerInfo.quoteType && <span className="text-muted-foreground">· {tickerInfo.quoteType}</span>}
+                  </p>
+                )}
+                {tickerInfo && !tickerInfo.valid && (
+                  <p className="text-xs text-red-500 flex items-center gap-1 mt-0.5">
+                    <XCircle className="h-3 w-3 shrink-0" />
+                    {tickerInfo.error || "Symbol nicht gefunden"}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Symbol / Ticker</label>
+                <div className="flex items-center h-10 px-3 rounded-md border border-dashed border-muted text-xs text-muted-foreground">
+                  {sourceType === "cash" ? "Kein Symbol nötig (1 EUR)" : "Kein Symbol nötig (manuell)"}
+                </div>
+              </div>
+            )}
+            {/* Name */}
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Name</label>
+              <Input
+                placeholder={tickerInfo?.valid ? tickerInfo.shortName || "Name" : "Name"}
+                value={name}
+                onChange={e => setName(e.target.value)}
+                data-testid="input-asset-name"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={() => createMutation.mutate()} disabled={!canCreate} data-testid="button-create-asset">
+              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+              Asset erstellen
+            </Button>
           </div>
         </CardContent>
       </Card>

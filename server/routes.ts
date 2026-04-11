@@ -72,6 +72,66 @@ export async function registerRoutes(
     res.json(data);
   });
 
+  // Ticker-Lookup: validate a symbol and return metadata from Yahoo Finance
+  // IMPORTANT: must be registered BEFORE /api/assets/:id to avoid route conflict
+  app.get("/api/assets/ticker-lookup", async (req, res) => {
+    const symbol = String(req.query.symbol || "").trim();
+    if (!symbol) {
+      return res.status(400).json({ error: "Kein Symbol angegeben" });
+    }
+    try {
+      const mod = await import("yahoo-finance2");
+      const YahooFinance = mod.default || mod;
+      const yf = typeof YahooFinance === "function" ? new YahooFinance() : YahooFinance;
+
+      // Normalise precious metal symbols to their futures tickers
+      const sym = symbol.toUpperCase();
+      let lookupSymbol = sym;
+      if (sym === "XAU" || sym === "GOLD") lookupSymbol = "GC=F";
+      else if (sym === "XAG" || sym === "SILVER") lookupSymbol = "SI=F";
+
+      // Try quote() first for exact ticker match
+      try {
+        const quote = await yf.quote(lookupSymbol);
+        if (quote && (quote.shortName || quote.longName)) {
+          return res.json({
+            valid: true,
+            symbol: lookupSymbol,
+            displaySymbol: symbol,
+            shortName: quote.shortName || quote.longName,
+            longName: quote.longName || quote.shortName,
+            exchange: quote.fullExchangeName || quote.exchange || null,
+            quoteType: quote.quoteType || null,
+            currency: quote.currency || null,
+          });
+        }
+      } catch (_quoteErr) {
+        // quote() failed — fall through to search()
+      }
+
+      // Fall back to search for partial matches
+      const searchResult = await yf.search(symbol, { newsCount: 0 });
+      const hit = (searchResult?.quotes || []).find((q: any) => q.symbol && q.shortname);
+      if (hit) {
+        return res.json({
+          valid: true,
+          symbol: hit.symbol,
+          displaySymbol: symbol,
+          shortName: hit.shortname || hit.longname || hit.symbol,
+          longName: hit.longname || hit.shortname || null,
+          exchange: hit.exchDisp || hit.exchange || null,
+          quoteType: hit.quoteType || hit.typeDisp || null,
+          currency: null,
+        });
+      }
+
+      return res.json({ valid: false, error: `Symbol "${symbol}" nicht gefunden` });
+    } catch (err: any) {
+      console.error("Ticker-Lookup error:", err?.message);
+      return res.status(502).json({ valid: false, error: `Yahoo Finance Fehler: ${err?.message || "Unbekannt"}` });
+    }
+  });
+
   app.get("/api/assets/:id", async (req, res) => {
     const asset = await storage.getAsset(Number(req.params.id));
     if (!asset) return res.status(404).json({ message: "Asset not found" });
