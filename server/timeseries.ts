@@ -251,6 +251,74 @@ export function computeAreaDistribution(
   return results;
 }
 
+export interface CategoryDistribution {
+  category: string;
+  categoryLabel: string;
+  value: number;
+  percent: number;
+}
+
+/**
+ * Compute percentage distribution of asset categories across all holdings at a given date.
+ */
+export function computeCategoryDistribution(
+  holdings: Holding[],
+  assetsMap: Map<number, Asset>,
+  pricePointsMap: Map<number, PricePoint[]>,
+  entriesMap: Map<number, HoldingEntry[]>,
+  date: string
+): CategoryDistribution[] {
+  const CATEGORY_LABELS: Record<string, string> = {
+    stock:  "Aktien",
+    etf:    "ETFs",
+    crypto: "Krypto",
+    metal:  "Edelmetalle",
+    cash:   "Cash",
+    custom: "Sonstiges",
+  };
+
+  const categoryTotals = new Map<string, number>();
+  let total = 0;
+
+  for (const h of holdings) {
+    const asset = assetsMap.get(h.assetId);
+    if (!asset) continue;
+    const isCash = asset.sourceType === "cash";
+    const pps = pricePointsMap.get(h.assetId) || [];
+    const entries = entriesMap.get(h.id) || [];
+
+    let quantity: number;
+    if (entries.length > 0) {
+      quantity = getQuantityOnDate(entries, date);
+    } else {
+      if (!isHoldingActiveOnDate(h, date)) continue;
+      quantity = h.quantity;
+    }
+    if (quantity === 0) continue;
+
+    const pricePerUnit = interpolatePrice(date, pps, isCash);
+    const value = quantity * pricePerUnit;
+    const cat = asset.category || "custom";
+    categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + value);
+    total += value;
+  }
+
+  // Build result in a fixed display order
+  const ORDER = ["stock", "etf", "crypto", "metal", "cash", "custom"];
+  const results: CategoryDistribution[] = [];
+  for (const cat of ORDER) {
+    const value = categoryTotals.get(cat);
+    if (!value || value <= 0) continue;
+    results.push({
+      category: cat,
+      categoryLabel: CATEGORY_LABELS[cat] ?? cat,
+      value: Math.round(value * 100) / 100,
+      percent: total > 0 ? Math.round((value / total) * 10000) / 100 : 0,
+    });
+  }
+  return results;
+}
+
 /**
  * Compute percentage distribution of assets within one area at a given date.
  */

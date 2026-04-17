@@ -22,6 +22,16 @@ const CHART_COLORS = [
   "hsl(27, 70%, 55%)",   // orange
 ];
 
+// Semantic per-category colors
+const CATEGORY_COLORS: Record<string, string> = {
+  stock:  "hsl(183, 55%, 42%)",   // teal
+  etf:    "hsl(213, 65%, 55%)",   // blue
+  crypto: "hsl(27, 90%, 58%)",    // orange
+  metal:  "hsl(43, 74%, 55%)",    // gold
+  cash:   "hsl(103, 43%, 47%)",   // green
+  custom: "hsl(262, 50%, 58%)",   // purple
+};
+
 type TimeRange = "7d" | "1m" | "3m" | "6m" | "1y" | "all";
 
 function getDateRange(range: TimeRange): { from: string; to: string } {
@@ -66,6 +76,14 @@ export default function Dashboard() {
     queryKey: ["/api/distribution/areas", `?date=${to}`],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/distribution/areas?date=${to}`);
+      return res.json();
+    },
+  });
+
+  const { data: categoryDistribution } = useQuery<{ category: string; categoryLabel: string; value: number; percent: number }[]>({
+    queryKey: ["/api/distribution/categories", `?date=${to}`],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/distribution/categories?date=${to}`);
       return res.json();
     },
   });
@@ -238,6 +256,9 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
+      {/* Distribution donuts: side by side on desktop */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
       {/* Area distribution donut */}
       <Card data-testid="card-area-distribution">
         <CardHeader>
@@ -295,6 +316,73 @@ export default function Dashboard() {
           )}
         </CardContent>
       </Card>
+
+      {/* Category distribution donut */}
+      <Card data-testid="card-category-distribution">
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">Verteilung nach Kategorie</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!categoryDistribution ? (
+            <Skeleton className="h-[280px] w-full" />
+          ) : categoryDistribution.length === 0 ? (
+            <div className="h-[280px] flex items-center justify-center text-sm text-muted-foreground">
+              Keine Daten verfügbar
+            </div>
+          ) : (
+            <div className="flex flex-col md:flex-row items-center gap-6">
+              <ResponsiveContainer width="100%" height={280}>
+                <PieChart>
+                  <Pie
+                    data={categoryDistribution}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={100}
+                    paddingAngle={2}
+                    dataKey="value"
+                    nameKey="categoryLabel"
+                  >
+                    {categoryDistribution.map((d) => (
+                      <Cell
+                        key={d.category}
+                        fill={CATEGORY_COLORS[d.category] ?? "hsl(var(--muted-foreground))"}
+                      />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip
+                    contentStyle={{
+                      backgroundColor: "hsl(var(--popover))",
+                      borderColor: "hsl(var(--border))",
+                      borderRadius: "8px",
+                      fontSize: 12,
+                      color: "hsl(var(--popover-foreground))",
+                    }}
+                    labelStyle={{ color: "hsl(var(--popover-foreground))", fontWeight: 600 }}
+                    itemStyle={{ color: "hsl(var(--popover-foreground))" }}
+                    formatter={(value: number, name: string) => [formatEur(value), name]}
+                  />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="space-y-2 min-w-[180px]">
+                {categoryDistribution.map((d) => (
+                  <div key={d.category} className="flex items-center gap-2 text-sm">
+                    <div
+                      className="w-3 h-3 rounded-sm flex-shrink-0"
+                      style={{ backgroundColor: CATEGORY_COLORS[d.category] ?? "hsl(var(--muted-foreground))" }}
+                    />
+                    <span className="text-muted-foreground flex-1">{d.categoryLabel}</span>
+                    <span className="font-medium tabular-nums">{d.percent.toFixed(1)}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      </div>{/* end donuts grid */}
     </div>
   );
 }

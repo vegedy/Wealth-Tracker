@@ -7,6 +7,7 @@ import {
   computeTotalTimeSeries,
   computeAreaDistribution,
   computeAssetDistributionInArea,
+  computeCategoryDistribution,
   generateDateRange,
   type AreaTimeSeries,
 } from "./timeseries";
@@ -352,6 +353,36 @@ export async function registerRoutes(
     }
 
     const distribution = computeAreaDistribution(allAreas, holdingsMap, assetsMap, pricePointsMap, entriesMap, date);
+    res.json(distribution);
+  });
+
+  /** GET /api/distribution/categories?date=YYYY-MM-DD */
+  app.get("/api/distribution/categories", async (req, res) => {
+    const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
+
+    const allAssets    = await storage.getAllAssets();
+    const allHoldings  = await storage.getAllHoldings();
+    const allEntries   = await storage.getAllHoldingEntries();
+    const allPricePoints = await storage.getAllPricePoints();
+
+    const assetsMap = new Map<number, Asset>();
+    for (const a of allAssets) assetsMap.set(a.id, a);
+
+    const entriesMap = new Map<number, HoldingEntry[]>();
+    for (const e of allEntries) {
+      const arr = entriesMap.get(e.holdingId) || [];
+      arr.push(e);
+      entriesMap.set(e.holdingId, arr);
+    }
+
+    const pricePointsMap = new Map<number, PricePoint[]>();
+    for (const pp of allPricePoints) {
+      const arr = pricePointsMap.get(pp.assetId) || [];
+      arr.push(pp);
+      pricePointsMap.set(pp.assetId, arr);
+    }
+
+    const distribution = computeCategoryDistribution(allHoldings, assetsMap, pricePointsMap, entriesMap, date);
     res.json(distribution);
   });
 
