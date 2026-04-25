@@ -77,16 +77,18 @@ function getYahooTicker(asset: Asset): { ticker: string; divisor: number; needsE
 }
 
 /**
- * Fetch current USD/EUR exchange rate.
+ * Fetch current EUR/USD exchange rate.
+ * EURUSD=X returns how many USD per 1 EUR (e.g. 1.08).
+ * To convert a USD price to EUR: price_usd / eurUsdRate
  */
-async function fetchEurRate(): Promise<number> {
+async function fetchEurUsdRate(): Promise<number> {
   try {
     const yf = await getYahooFinance();
     const quote = await yf.quote("EURUSD=X");
-    return quote?.regularMarketPrice || 0.92; // fallback
+    return quote?.regularMarketPrice || 1.08; // fallback
   } catch {
-    console.warn("Could not fetch EUR/USD rate, using fallback 0.92");
-    return 0.92;
+    console.warn("Could not fetch EUR/USD rate, using fallback 1.08");
+    return 1.08;
   }
 }
 
@@ -135,10 +137,10 @@ export async function fetchPricesForAsset(asset: Asset): Promise<{ added: number
       return { added: 0, error: `Keine Daten von Yahoo Finance für ${mapping.ticker}` };
     }
 
-    // Get EUR conversion rate if needed
-    let eurRate = 1;
+    // Get EUR/USD rate if needed (EURUSD=X = USD per 1 EUR, so divide to convert USD→EUR)
+    let eurUsdRate = 1;
     if (mapping.needsEurConversion) {
-      eurRate = await fetchEurRate();
+      eurUsdRate = await fetchEurUsdRate();
     }
 
     let added = 0;
@@ -146,7 +148,7 @@ export async function fetchPricesForAsset(asset: Asset): Promise<{ added: number
       if (!q.close || !q.date) continue;
 
       const priceUsd = q.close / mapping.divisor;
-      const priceEur = mapping.needsEurConversion ? priceUsd * eurRate : priceUsd;
+      const priceEur = mapping.needsEurConversion ? priceUsd / eurUsdRate : priceUsd;
       const timestamp = new Date(q.date).toISOString();
 
       await storage.createPricePoint({

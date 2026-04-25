@@ -426,6 +426,17 @@ export async function registerRoutes(
     res.json(result);
   });
 
+  // Wipe all price points for all known_market_assets and re-fetch from scratch.
+  app.post("/api/prices/refetch-all", async (_req, res) => {
+    const allAssets = await storage.getAllAssets();
+    const marketAssets = allAssets.filter(a => a.sourceType === "known_market_asset");
+    for (const asset of marketAssets) {
+      await storage.deletePricePointsByAsset(asset.id);
+    }
+    const result = await fetchAllMarketPrices();
+    res.json(result);
+  });
+
   app.post("/api/prices/fetch/:assetId", async (req, res) => {
     const asset = await storage.getAsset(Number(req.params.assetId));
     if (!asset) return res.status(404).json({ message: "Asset not found" });

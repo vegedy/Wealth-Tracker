@@ -305,6 +305,10 @@ export class DatabaseStorage implements IStorage {
     db.delete(pricePoints).where(eq(pricePoints.id, id)).run();
   }
 
+  async deletePricePointsByAsset(assetId: number) {
+    db.delete(pricePoints).where(eq(pricePoints.assetId, assetId)).run();
+  }
+
   // ── Bulk ──
   async getAllPricePoints() {
     return db.select().from(pricePoints).orderBy(asc(pricePoints.timestamp)).all();
