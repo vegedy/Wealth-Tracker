@@ -196,6 +196,11 @@ function AssetsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: Pr
   // so we can overwrite it on the next successful lookup
   const nameAutoFilled = useRef(false);
 
+  // Inline edit state
+  const [editingAssetId, setEditingAssetId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+
   const needsSymbol = SYMBOL_REQUIRED_SOURCES.includes(sourceType);
 
   // Auto-switch sourceType when category changes
@@ -289,6 +294,27 @@ function AssetsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: Pr
       toast({ title: "Asset gelöscht" });
     },
   });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, name, category }: { id: number; name: string; category: string }) =>
+      apiRequest("PATCH", `/api/assets/${id}`, { name, category }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/assets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/distribution/categories"] });
+      setEditingAssetId(null);
+      toast({ title: "Asset aktualisiert" });
+    },
+  });
+
+  function startEditAsset(asset: Asset) {
+    setEditingAssetId(asset.id);
+    setEditName(asset.name);
+    setEditCategory(asset.category || "custom");
+  }
+
+  function cancelEditAsset() {
+    setEditingAssetId(null);
+  }
 
   function getStatus(assetId: number) {
     return priceStatus?.find(s => s.assetId === assetId);
@@ -423,33 +449,86 @@ function AssetsTab({ assets, priceStatus }: { assets?: Asset[]; priceStatus?: Pr
       <div className="space-y-2">
         {assets?.map(asset => {
           const status = getStatus(asset.id);
+          const isEditing = editingAssetId === asset.id;
           return (
             <Card key={asset.id} data-testid={`card-asset-${asset.id}`}>
-              <CardContent className="flex items-center justify-between py-3">
-                <div className="flex items-center gap-3">
-                  {asset.sourceType === "cash" ? <Coins className="h-4 w-4 text-muted-foreground" /> : <Package className="h-4 w-4 text-muted-foreground" />}
-                  <div>
-                    <div className="font-medium text-sm flex items-center gap-2">
-                      {asset.name}
-                      {status && asset.sourceType !== "cash" && (
-                        status.hasPriceData
-                          ? <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400"><CheckCircle2 className="h-3.5 w-3.5" />{status.totalPoints} Preispunkte</span>
-                          : <span className="inline-flex items-center gap-1 text-xs text-yellow-600 dark:text-yellow-400"><AlertTriangle className="h-3.5 w-3.5" />Keine Preisdaten</span>
-                      )}
+              <CardContent className="py-3">
+                {isEditing ? (
+                  /* ── EDIT MODE ── */
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      {asset.sourceType === "cash" ? <Coins className="h-4 w-4 text-muted-foreground shrink-0" /> : <Package className="h-4 w-4 text-muted-foreground shrink-0" />}
+                      <div className="flex gap-2 flex-1 flex-wrap">
+                        <Input
+                          value={editName}
+                          onChange={e => setEditName(e.target.value)}
+                          className="h-8 text-sm w-48"
+                          placeholder="Name"
+                          data-testid={`input-edit-asset-name-${asset.id}`}
+                          onKeyDown={e => {
+                            if (e.key === "Enter" && editName.trim()) updateMutation.mutate({ id: asset.id, name: editName.trim(), category: editCategory });
+                            if (e.key === "Escape") cancelEditAsset();
+                          }}
+                          autoFocus
+                        />
+                        <Select value={editCategory} onValueChange={setEditCategory}>
+                          <SelectTrigger className="h-8 text-sm w-36" data-testid={`select-edit-asset-category-${asset.id}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
-                    <div className="flex gap-2 mt-0.5 flex-wrap">
-                      <Badge variant="secondary" className="text-xs">{CATEGORIES.find(c => c.value === asset.category)?.label || asset.category}</Badge>
-                      {asset.symbol && <Badge variant="outline" className="text-xs">{asset.symbol}</Badge>}
-                      <Badge variant="outline" className="text-xs">{SOURCE_TYPES.find(s => s.value === asset.sourceType)?.label || asset.sourceType}</Badge>
-                      {status?.latestDate && status.latestDate !== "immer" && (
-                        <Badge variant="outline" className="text-xs text-muted-foreground">Letzter Preis: {formatEur(status.latestPrice || 0)} ({status.latestDate})</Badge>
-                      )}
+                    <div className="flex gap-1 shrink-0">
+                      <Button
+                        variant="ghost" size="icon"
+                        disabled={!editName.trim() || updateMutation.isPending}
+                        onClick={() => updateMutation.mutate({ id: asset.id, name: editName.trim(), category: editCategory })}
+                        data-testid={`button-save-asset-${asset.id}`}
+                      >
+                        {updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-green-600" />}
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={cancelEditAsset} data-testid={`button-cancel-edit-asset-${asset.id}`}>
+                        <X className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(asset.id)} data-testid={`button-delete-asset-${asset.id}`}>
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
+                ) : (
+                  /* ── VIEW MODE ── */
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {asset.sourceType === "cash" ? <Coins className="h-4 w-4 text-muted-foreground" /> : <Package className="h-4 w-4 text-muted-foreground" />}
+                      <div>
+                        <div className="font-medium text-sm flex items-center gap-2">
+                          {asset.name}
+                          {status && asset.sourceType !== "cash" && (
+                            status.hasPriceData
+                              ? <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400"><CheckCircle2 className="h-3.5 w-3.5" />{status.totalPoints} Preispunkte</span>
+                              : <span className="inline-flex items-center gap-1 text-xs text-yellow-600 dark:text-yellow-400"><AlertTriangle className="h-3.5 w-3.5" />Keine Preisdaten</span>
+                          )}
+                        </div>
+                        <div className="flex gap-2 mt-0.5 flex-wrap">
+                          <Badge variant="secondary" className="text-xs">{CATEGORIES.find(c => c.value === asset.category)?.label || asset.category}</Badge>
+                          {asset.symbol && <Badge variant="outline" className="text-xs">{asset.symbol}</Badge>}
+                          <Badge variant="outline" className="text-xs">{SOURCE_TYPES.find(s => s.value === asset.sourceType)?.label || asset.sourceType}</Badge>
+                          {status?.latestDate && status.latestDate !== "immer" && (
+                            <Badge variant="outline" className="text-xs text-muted-foreground">Letzter Preis: {formatEur(status.latestPrice || 0)} ({status.latestDate})</Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => startEditAsset(asset)} data-testid={`button-edit-asset-${asset.id}`}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(asset.id)} data-testid={`button-delete-asset-${asset.id}`}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           );
